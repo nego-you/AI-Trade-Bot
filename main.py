@@ -149,7 +149,20 @@ schedule.every().hour.at(":00").do(run_trading_logic)
 # テスト用（10秒ごと）は先頭の # を外して使う
 # schedule.every(10).seconds.do(run_trading_logic)
 
+import sys
+import argparse
+
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Vibe Bot Trading Logic")
+    parser.add_argument("--run-once", action="store_true", help="Run the trading logic once and exit")
+    args = parser.parse_args()
+
+    if args.run_once:
+        print("🚀 Vibe Botを1回のみ実行します (GitHub Actions等用)...")
+        _print_usage_stats()
+        run_trading_logic()
+        sys.exit(0)
+
     print("🚀 Vibe Botが起動しました。スケジュール待機に入ります...")
     _print_usage_stats()
 

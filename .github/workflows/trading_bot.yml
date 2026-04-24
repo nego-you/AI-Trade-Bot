@@ -1,0 +1,67 @@
+name: AI Trade Bot Daily Run
+
+on:
+  schedule:
+    # 毎日平日の UTC 8:00 (JST 17:00) に実行
+    # 市場が閉じた後に1日のニュースをまとめて分析する想定
+    - cron: '0 8 * * 1-5'
+  workflow_dispatch:
+    # GitHubの画面から手動で実行可能にするための設定
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check Market Day (Skip on weekends & JP holidays)
+        id: check_holiday
+        run: |
+          # 休日チェックスクリプトを実行。休日ならエラー（exit 1）を返して後続ステップをスキップさせるが、
+          # action自体をfailureにしたくない場合はcontinue-on-errorを使うか、シェル内で条件分岐する。
+          # 今回は、pythonスクリプトの終了コードをチェックし、休日ならGITHUB_ENVにフラグを立てる。
+          if python src/utils/check_holiday.py; then
+            echo "MARKET_OPEN=true" >> $GITHUB_ENV
+          else
+            echo "MARKET_OPEN=false" >> $GITHUB_ENV
+          fi
+          
+          # ★★★ 特例設定 ★★★
+          # 初期設定のテストのため、本日（手動実行時）は強制的に実行フラグを立てる場合はここを調整しますが、
+          # 休日チェックスクリプト側で対応するか、ここで行います。
+          # ユーザーからの「今日だけ動かして」という要望に対し、workflow_dispatch（手動実行）の時は強制実行とします。
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "MARKET_OPEN=true" >> $GITHUB_ENV
+            echo "Manual trigger detected. Forcing MARKET_OPEN=true for testing."
+          fi
+
+      - name: Create Dummy local files (if necessary for Actions)
+        if: env.MARKET_OPEN == 'true'
+        run: |
+          # 必要に応じて、GitHub Actions上で実行するためのダミーファイルやディレクトリを作成
+          mkdir -p .claude db/init
+
+      - name: Run Trading Bot
+        if: env.MARKET_OPEN == 'true'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          # その他、必要なシークレット環境変数があればここに追加
+          # GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          # GMAIL_PASS: ${{ secrets.GMAIL_PASS }}
+          # SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+        run: |
+          # 1回のみ実行するフラグをつけて起動
+          python main.py --run-once
