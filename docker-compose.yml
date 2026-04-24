@@ -1,17 +1,24 @@
+version: '3.8'
+
 services:
   db:
     image: postgres:16
     container_name: vibe-investor-db
-    restart: always
     environment:
       POSTGRES_USER: user
-      POSTGRES_PASSWORD: password 
-      POSTGRES_DB: vibe_investor
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: vibe_db
     ports:
       - "5432:5432"
-    volumes:
-      - ./db/init:/docker-entrypoint-initdb.d
-      - postgres_data:/var/lib/postgresql/data
 
-volumes:
-  postgres_data:
+  app:
+    build: .
+    container_name: ai_trade_app
+    depends_on:
+      - db
+    volumes:
+      - .:/app
+    environment:
+      - TZ=Asia/Tokyo
+      - PYTHONUNBUFFERED=1  # 🚀 これでログがリアルタイムに表示されます！
+    command: python main.py    # 🚀 「何もしない」から「Python実行」に変更！
