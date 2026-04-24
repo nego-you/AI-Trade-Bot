@@ -17,8 +17,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# パニック度がこの値以上になったら Gemini に判断を委ねる
+# Ollama スコアがこの値以上 → Gemini に BUY/SKIP 判断を委ねる
 PANIC_THRESHOLD = 70
+# Gemini が BUY かつパニック度がこの値以上 → Gmail アラート対象
+ALERT_THRESHOLD = 85
 
 
 def _parse_json(raw: str) -> dict:
@@ -58,7 +60,7 @@ def run_trading_logic():
     # 2. Ollama でパニックスコア評価 → 閾値超えは Gemini で判断
     # --------------------------------------------------
     items = []
-    alert_targets = []
+    alert_targets = []   # ALERT_THRESHOLD 以上かつ BUY のみ
 
     for news in news_list:
         title = news['title']
@@ -66,26 +68,26 @@ def run_trading_logic():
         # --- Ollama: パニック度スコアリング ---
         ollama = _parse_json(evaluate_news_with_ollama(title))
         if 'error' in ollama:
-            panic_score = 0
+            panic_score  = 0
             panic_reason = f"Ollama 未応答（{ollama.get('error', '')}）"
             logger.warning("Ollama error for '%s': %s", title[:30], ollama['error'])
         else:
-            panic_score = int(ollama.get('panic_score', 0))
+            panic_score  = int(ollama.get('panic_score', 0))
             panic_reason = ollama.get('reason', '')
 
-        # --- Gemini: 閾値以上のみ BUY/SKIP 判定 ---
+        # --- Gemini: PANIC_THRESHOLD 以上のみ BUY/SKIP 判定 ---
         if panic_score >= PANIC_THRESHOLD:
             gemini = _parse_json(decide_trade_with_gemini(title, panic_score))
             record_gemini_calls(1)
             if 'error' in gemini:
-                decision = "ERROR"
+                decision        = "ERROR"
                 decision_reason = f"Gemini エラー（{gemini.get('error', '')}）"
                 logger.warning("Gemini error for '%s': %s", title[:30], gemini['error'])
             else:
-                decision = gemini.get('decision', 'SKIP')
+                decision        = gemini.get('decision', 'SKIP')
                 decision_reason = gemini.get('reason', '')
         else:
-            decision = "HOLD"
+            decision        = "HOLD"
             decision_reason = ""
 
         item = {
@@ -97,11 +99,12 @@ def run_trading_logic():
         }
         items.append(item)
 
-        icon = "🚨" if decision == "BUY" else "✅" if panic_score >= PANIC_THRESHOLD else "  "
-        print(f"  {icon} [{news['source']}] パニック度:{panic_score:3d} {decision:<5} {title[:45]}")
-
-        if decision == "BUY":
+        # ALERT_THRESHOLD 以上かつ BUY → メール対象
+        if panic_score >= ALERT_THRESHOLD and decision == "BUY":
             alert_targets.append(item)
+
+        icon = "🚨" if item in alert_targets else ("⚠️ " if decision == "BUY" else "  ")
+        print(f"  {icon} [{news['source']}] パニック度:{panic_score:3d} {decision:<5} {title[:45]}")
 
     # --------------------------------------------------
     # 3. スプレッドシートへ一括記録（1ニュース = 1レコード）
@@ -112,16 +115,14 @@ def run_trading_logic():
         print("❌ スプレッドシートへの記録に失敗しました。")
 
     # --------------------------------------------------
-    # 4. BUY シグナルは Gmail でアラート送信
+    # 4. アラート対象があれば 1 通にまとめて Gmail 送信
+    #    （PANIC_THRESHOLD を超えて BUY でも ALERT_THRESHOLD 未満は送信しない）
     # --------------------------------------------------
-    for target in alert_targets:
-        print(f"🚨 BUY シグナル検出 → Gmail を送信中...")
-        send_gmail_alert(
-            news_title=target['title'],
-            panic_score=target['panic_score'],
-            decision=target['decision'],
-            reason=target['decision_reason'],
-        )
+    if alert_targets:
+        print(f"🚨 {len(alert_targets)} 件が ALERT_THRESHOLD({ALERT_THRESHOLD}) 以上の BUY シグナル → Gmail を送信中...")
+        send_gmail_alert(alert_targets, get_daily_stats())
+    else:
+        print(f"📭 ALERT_THRESHOLD({ALERT_THRESHOLD}) 以上の BUY シグナルはありませんでした。")
 
     # --------------------------------------------------
     # 5. Gemini API 無料枠の残量を表示
