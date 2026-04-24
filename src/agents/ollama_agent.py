@@ -3,13 +3,17 @@ Ollama agent: scores news "panic level" (0-100) using a local LLM.
 """
 import json
 import logging
+import os
 
 import requests
 
 logger = logging.getLogger(__name__)
 
-OLLAMA_URL = "http://host.docker.internal:11434/api/generate"
-OLLAMA_MODEL = "llama3"
+# Docker 内なら host.docker.internal、ローカル直接実行なら localhost
+_OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_URL = f"{_OLLAMA_HOST}/api/generate"
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "90"))
 
 
 def evaluate_news_with_ollama(news_text: str) -> str:
@@ -41,7 +45,7 @@ def evaluate_news_with_ollama(news_text: str) -> str:
     }
 
     try:
-        response = requests.post(OLLAMA_URL, json=payload, timeout=30)
+        response = requests.post(OLLAMA_URL, json=payload, timeout=OLLAMA_TIMEOUT)
         response.raise_for_status()
         return response.json().get("response", "") or json.dumps(
             {"error": "Empty response from Ollama"}

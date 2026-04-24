@@ -13,10 +13,21 @@ load_dotenv()
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
-SHEET_RANGE = 'シート1!A1'
+SHEET_NAME = 'シート1'
+SHEET_RANGE = f'{SHEET_NAME}!A1'
 
-# スプレッドシートのヘッダー列定義
-HEADERS = ['取得日時', 'ソース', 'タイトル', 'URL', '発行日時', 'パニックスコア', '判断', '理由']
+# 列定義（順番と名前を変えたらここだけ直す）
+HEADERS = [
+    '取得日時',
+    'ソース',
+    'タイトル',
+    'URL',
+    '発行日時',
+    'パニックスコア',
+    'パニック理由',
+    '判断',
+    '判断理由',
+]
 
 
 def get_service():
@@ -55,30 +66,58 @@ def get_service():
     return build('sheets', 'v4', credentials=creds)
 
 
+def _get_first_sheet_id(service) -> int:
+    meta = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
+    return meta['sheets'][0]['properties']['sheetId']
+
+
 def _ensure_headers(service) -> None:
-    """シートが空の場合にヘッダー行を書き込む"""
+    """
+    A1 が期待するヘッダーでない場合、先頭に1行挿入してヘッダーを書き込む。
+    既存データは1行下にずれるだけで削除されない。
+    """
     result = service.spreadsheets().values().get(
         spreadsheetId=SPREADSHEET_ID,
-        range='シート1!A1:A1'
+        range=f'{SHEET_NAME}!A1'
     ).execute()
-    if not result.get('values'):
-        service.spreadsheets().values().update(
-            spreadsheetId=SPREADSHEET_ID,
-            range=SHEET_RANGE,
-            valueInputOption='USER_ENTERED',
-            body={'values': [HEADERS]}
-        ).execute()
+    existing_a1 = (result.get('values') or [['']])[0][0]
+
+    if existing_a1 == HEADERS[0]:
+        return  # 既にヘッダーあり
+
+    sheet_id = _get_first_sheet_id(service)
+    service.spreadsheets().batchUpdate(
+        spreadsheetId=SPREADSHEET_ID,
+        body={
+            'requests': [{
+                'insertDimension': {
+                    'range': {
+                        'sheetId': sheet_id,
+                        'dimension': 'ROWS',
+                        'startIndex': 0,
+                        'endIndex': 1,
+                    },
+                    'inheritFromBefore': False,
+                }
+            }]
+        }
+    ).execute()
+    service.spreadsheets().values().update(
+        spreadsheetId=SPREADSHEET_ID,
+        range=SHEET_RANGE,
+        valueInputOption='USER_ENTERED',
+        body={'values': [HEADERS]}
+    ).execute()
 
 
 def append_news_rows(news_items: list[dict]) -> bool:
     """
     ニュースアイテムのリストをスプレッドシートに一括追記する。
 
-    Args:
-        news_items: {"source", "title", "url", "published", "summary",
-                     "panic_score", "decision", "reason"} のリスト
-    Returns:
-        True if successful, False otherwise.
+    各 dict のキー:
+        source, title, url, published  （スクレイパー由来）
+        panic_score, panic_reason       （Ollama 由来）
+        decision, decision_reason       （Gemini 由来）
     """
     if not news_items:
         return True
@@ -96,8 +135,9 @@ def append_news_rows(news_items: list[dict]) -> bool:
                 item.get('url', ''),
                 item.get('published', ''),
                 item.get('panic_score', ''),
+                item.get('panic_reason', ''),
                 item.get('decision', ''),
-                item.get('reason', ''),
+                item.get('decision_reason', ''),
             ]
             for item in news_items
         ]
