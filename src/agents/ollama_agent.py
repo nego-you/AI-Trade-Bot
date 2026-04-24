@@ -1,13 +1,24 @@
-import requests
+"""
+Ollama agent: scores news "panic level" (0-100) using a local LLM.
+"""
 import json
+import logging
 
-def evaluate_news_with_ollama(news_text):
+import requests
+
+logger = logging.getLogger(__name__)
+
+OLLAMA_URL = "http://host.docker.internal:11434/api/generate"
+OLLAMA_MODEL = "llama3"
+
+
+def evaluate_news_with_ollama(news_text: str) -> str:
     """
-    Ollama APIを叩いて、ニュースのパニック度を評価する関数
+    Ask Ollama to score the panic level of a news item.
+
+    Returns a JSON string. On success: {"panic_score": int, "reason": str}.
+    On failure: {"error": "..."}.
     """
-    url = "http://host.docker.internal:11434/api/generate"
-    
-    # AIに与える指示（プロンプト）
     prompt = f"""
 あなたは優秀な金融アナリストです。
 以下のニュースが株価に与える影響（パニック度）を0〜100で評価し、その理由をJSON形式で返してください。
@@ -22,27 +33,25 @@ def evaluate_news_with_ollama(news_text):
 }}
 """
 
-    # Ollamaに送るデータ（ペイロード）
     payload = {
-        "model": "llama3",
+        "model": OLLAMA_MODEL,
         "prompt": prompt,
-        "stream": False,  # 一括で結果を受け取るためにFalse
-        "format": "json"  # OllamaにJSON形式での出力を強制する機能
+        "stream": False,
+        "format": "json",
     }
 
     try:
-        # ホスト側のOllamaにリクエストを送信
-        response = requests.post(url, json=payload, timeout=30)
-        response.raise_for_status()  # 400や500エラーがあればここでキャッチ
-        
-        # 成功した場合、レスポンスの文字列をパースして返す
-        result_json = response.json()
-        return result_json.get("response", "")
-        
-    except Exception as e:
-        return {"error": f"Error communicating with Ollama API: {e}"}
+        response = requests.post(OLLAMA_URL, json=payload, timeout=30)
+        response.raise_for_status()
+        return response.json().get("response", "") or json.dumps(
+            {"error": "Empty response from Ollama"}
+        )
+    except requests.RequestException as e:
+        logger.error("Error communicating with Ollama API: %s", e)
+        return json.dumps({"error": f"Error communicating with Ollama API: {e}"})
 
-# ファイル直接実行時のテスト用
+
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     test_news = "日経平均株価が急落。市場は不安定な状況に。"
     print(evaluate_news_with_ollama(test_news))

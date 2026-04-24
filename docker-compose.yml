@@ -13,17 +13,5 @@ services:
       - ./db/init:/docker-entrypoint-initdb.d
       - postgres_data:/var/lib/postgresql/data
 
-  app:
-    build:
-      context: .
-      dockerfile: .devcontainer/Dockerfile
-    container_name: vibe-investor-app
-    volumes:
-      - .:/workspace:cached
-    environment:
-      - DATABASE_URL=postgresql://user:password@db:5432/vibe_investor
-    tty: true
-    stdin_open: true
-
 volumes:
   postgres_data:
