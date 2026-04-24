@@ -14,6 +14,7 @@ from agents.gemini_agent import decide_trade_with_gemini
 from agents.ollama_agent import evaluate_news_with_ollama
 from utils.notifier import send_gmail_alert
 from utils.scraper import fetch_latest_news
+from utils.spreadsheet import append_to_sheet
 
 logger = logging.getLogger(__name__)
 
@@ -56,11 +57,22 @@ def process_news_item(news: dict) -> None:
 
     gemini_raw = decide_trade_with_gemini(title, panic_score)
     gemini = _parse_json(gemini_raw)
-    if gemini.get("decision") != "BUY":
-        logger.info("Gemini decision: %s", gemini.get("decision") or gemini.get("error"))
+    decision = gemini.get("decision", "SKIP")
+    reason = gemini.get("reason", "")
+
+    # Log every Gemini result to Google Spreadsheet
+    append_to_sheet({
+        "news_title": title,
+        "panic_score": panic_score,
+        "decision": decision,
+        "reason": reason,
+        "virtual_pnl": 0,
+    })
+
+    if decision != "BUY":
+        logger.info("Gemini decision: %s", decision)
         return
 
-    reason = gemini.get("reason", "")
     logger.info("BUY signal. Sending alert.")
     send_gmail_alert(title, reason)
 

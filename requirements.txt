@@ -9,3 +9,5 @@ google-genai
 python-dotenv
 schedule
 yfinance
+gspread
+oauth2client
