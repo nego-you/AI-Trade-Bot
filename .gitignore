@@ -28,3 +28,6 @@ logs/
 # Google OAuth credentials (never commit these)
 credentials.json
 token.json
+
+# API usage tracking (local only)
+usage.json
