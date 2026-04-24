@@ -84,8 +84,18 @@ def run_trading_logic():
                 decision_reason = f"Gemini エラー（{gemini.get('error', '')}）"
                 logger.warning("Gemini error for '%s': %s", title[:30], gemini['error'])
             else:
-                decision        = gemini.get('decision', 'SKIP')
+                decision        = gemini.get('signal', 'HOLD')
                 decision_reason = gemini.get('reason', '')
+                company_name    = gemini.get('company_name', '')
+                ticker          = gemini.get('ticker')
+                
+                # 株価データの取得と連携
+                if ticker and str(ticker).lower() != 'null':
+                    from src.utils.stock_data import fetch_stock_data
+                    s_data = fetch_stock_data(str(ticker))
+                    if s_data:
+                        stock_info = f"【株価: {s_data['current_price']:.1f} (前日比 {s_data['change_percent']:+.2f}%)】"
+                        decision_reason = f"{stock_info} {decision_reason}"
         else:
             decision        = "HOLD"
             decision_reason = ""
