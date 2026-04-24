@@ -14,6 +14,51 @@ logger = logging.getLogger(__name__)
 
 GEMINI_MODEL = "gemini-2.5-flash"
 
+def evaluate_news_with_gemini(news_text: str) -> str:
+    """
+    Ask Gemini to score the panic level of a news item.
+
+    Returns a JSON string. On success: {"panic_score": int, "reason": str}.
+    On failure: {"error": "..."}.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        logger.error("GEMINI_API_KEY is not set.")
+        return json.dumps({"error": "GEMINI_API_KEY is not set"})
+
+    client = genai.Client(api_key=api_key)
+
+    system_instruction = """あなたは優秀な金融アナリストです。
+以下のニュースが株価に与える影響（パニック度）を0〜100で評価し、その理由をJSON形式で返してください。
+（0: 全く影響なし, 100: 歴史的な大暴落・大高騰の可能性あり）
+
+出力は以下のJSONフォーマットのみとしてください。それ以外の文章やMarkdownのコードブロック(```json)は含めないでください。
+{
+    "panic_score": 85,
+    "reason": "ここに理由を簡潔に記載"
+}"""
+
+    prompt = f"ニュース: {news_text}"
+
+    try:
+        chat = client.chats.create(model=GEMINI_MODEL, config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=0.1
+        ))
+        response = chat.send_message(prompt)
+        result_text = (response.text or "").strip()
+        
+        # Markdownが返ってきた場合は除去
+        if result_text.startswith("```json"):
+            result_text = result_text.replace("```json", "").replace("```", "").strip()
+        elif result_text.startswith("```"):
+            result_text = result_text.replace("```", "").strip()
+            
+        return result_text
+    except Exception as e:
+        logger.error("Error communicating with Gemini API for panic score: %s", e)
+        return json.dumps({"error": f"Error communicating with Gemini API: {e}"})
+
 def search_ticker(company_name: str) -> str:
     """
     企業名から日本の証券コード（4桁）を検索するツール。

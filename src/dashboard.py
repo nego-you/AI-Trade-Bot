@@ -15,7 +15,7 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-from agents.ollama_agent import evaluate_news_with_ollama
+from agents.gemini_agent import evaluate_news_with_gemini
 from utils.scraper import fetch_latest_news
 
 
@@ -35,12 +35,12 @@ def render_live_feed() -> None:
         st.dataframe(pd.DataFrame(news), use_container_width=True)
 
 
-def render_ollama_test() -> None:
-    st.subheader("Ollama 一次判定テスト")
+def render_gemini_test() -> None:
+    st.subheader("Gemini 一次判定テスト")
     text = st.text_area("ニュース本文", placeholder="例: 日経平均が歴史的な暴落を記録。")
     if st.button("パニック度を評価") and text.strip():
         with st.spinner("Evaluating..."):
-            raw = evaluate_news_with_ollama(text)
+            raw = evaluate_news_with_gemini(text)
         try:
             parsed = json.loads(raw)
             st.metric("panic_score", parsed.get("panic_score", "-"))
@@ -63,11 +63,11 @@ def main() -> None:
     st.title("📈 Vibe Investor Dashboard")
     st.caption(f"Last rendered: {datetime.now().isoformat(timespec='seconds')}")
 
-    tabs = st.tabs(["Live feed", "Ollama test", "History"])
+    tabs = st.tabs(["Live feed", "Gemini test", "History"])
     with tabs[0]:
         render_live_feed()
     with tabs[1]:
-        render_ollama_test()
+        render_gemini_test()
     with tabs[2]:
         render_history()
 

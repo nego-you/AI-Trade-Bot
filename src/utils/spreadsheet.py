@@ -116,7 +116,7 @@ def append_news_rows(news_items: list[dict]) -> bool:
 
     各 dict のキー:
         source, title, url, published  （スクレイパー由来）
-        panic_score, panic_reason       （Ollama 由来）
+        panic_score, panic_reason       （Gemini 由来）
         decision, decision_reason       （Gemini 由来）
     """
     if not news_items:

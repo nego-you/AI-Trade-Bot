@@ -4,8 +4,7 @@ import schedule
 import time
 import datetime
 
-from src.agents.ollama_agent import evaluate_news_with_ollama
-from src.agents.gemini_agent import decide_trade_with_gemini
+from src.agents.gemini_agent import evaluate_news_with_gemini, decide_trade_with_gemini
 from src.utils.scraper import fetch_latest_news
 from src.utils.spreadsheet import append_news_rows
 from src.utils.notifier import send_gmail_alert
@@ -17,7 +16,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Ollama スコアがこの値以上 → Gemini に BUY/SKIP 判断を委ねる
+# パニック度スコアがこの値以上 → Gemini に詳細分析（BUY/SKIP判定）を委ねる
 PANIC_THRESHOLD = 70
 # Gemini が BUY かつパニック度がこの値以上 → Gmail アラート対象
 ALERT_THRESHOLD = 85
@@ -57,7 +56,7 @@ def run_trading_logic():
     print(f"📰 {len(news_list)} 件のニュースを取得しました。")
 
     # --------------------------------------------------
-    # 2. Ollama でパニックスコア評価 → 閾値超えは Gemini で判断
+    # 2. Gemini でパニックスコア評価 → 閾値超えはさらに詳細分析
     # --------------------------------------------------
     items = []
     alert_targets = []   # ALERT_THRESHOLD 以上かつ BUY のみ
@@ -65,20 +64,24 @@ def run_trading_logic():
     for news in news_list:
         title = news['title']
 
-        # --- Ollama: パニック度スコアリング ---
-        ollama = _parse_json(evaluate_news_with_ollama(title))
-        if 'error' in ollama:
+        # --- Gemini: パニック度スコアリング ---
+        gemini_panic = _parse_json(evaluate_news_with_gemini(title))
+        record_gemini_calls(1)
+        time.sleep(4) # API Rate Limit対策 (15 RPM)
+        
+        if 'error' in gemini_panic:
             panic_score  = 0
-            panic_reason = f"Ollama 未応答（{ollama.get('error', '')}）"
-            logger.warning("Ollama error for '%s': %s", title[:30], ollama['error'])
+            panic_reason = f"Gemini未応答（{gemini_panic.get('error', '')}）"
+            logger.warning("Gemini error for panic score '%s': %s", title[:30], gemini_panic['error'])
         else:
-            panic_score  = int(ollama.get('panic_score', 0))
-            panic_reason = ollama.get('reason', '')
+            panic_score  = int(gemini_panic.get('panic_score', 0))
+            panic_reason = gemini_panic.get('reason', '')
 
         # --- Gemini: PANIC_THRESHOLD 以上のみ BUY/SKIP 判定 ---
         if panic_score >= PANIC_THRESHOLD:
             gemini = _parse_json(decide_trade_with_gemini(title, panic_score))
             record_gemini_calls(1)
+            time.sleep(4) # API Rate Limit対策
             if 'error' in gemini:
                 decision        = "ERROR"
                 decision_reason = f"Gemini エラー（{gemini.get('error', '')}）"
