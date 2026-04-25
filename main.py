@@ -4,7 +4,8 @@ import schedule
 import time
 import datetime
 
-from src.agents.gemini_agent import evaluate_news_with_gemini, decide_trade_with_gemini
+from src.agents.gemini_agent import decide_trade_with_gemini
+from src.agents.ollama_agent import evaluate_news_with_ollama
 from src.utils.scraper import fetch_latest_news
 from src.utils.spreadsheet import append_news_rows
 from src.utils.notifier import send_gmail_alert
@@ -64,18 +65,16 @@ def run_trading_logic():
     for news in news_list:
         title = news['title']
 
-        # --- Gemini: パニック度スコアリング ---
-        gemini_panic = _parse_json(evaluate_news_with_gemini(title))
-        record_gemini_calls(1)
-        time.sleep(4) # API Rate Limit対策 (15 RPM)
+        # --- Ollama: パニック度スコアリング ---
+        ollama_panic = _parse_json(evaluate_news_with_ollama(title))
         
-        if 'error' in gemini_panic:
+        if 'error' in ollama_panic:
             panic_score  = 0
-            panic_reason = f"Gemini未応答（{gemini_panic.get('error', '')}）"
-            logger.warning("Gemini error for panic score '%s': %s", title[:30], gemini_panic['error'])
+            panic_reason = f"Ollama未応答（{ollama_panic.get('error', '')}）"
+            logger.warning("Ollama error for panic score '%s': %s", title[:30], ollama_panic['error'])
         else:
-            panic_score  = int(gemini_panic.get('panic_score', 0))
-            panic_reason = gemini_panic.get('reason', '')
+            panic_score  = int(ollama_panic.get('panic_score', 0))
+            panic_reason = ollama_panic.get('reason', '')
 
         # --- Gemini: PANIC_THRESHOLD 以上のみ BUY/SKIP 判定 ---
         if panic_score >= PANIC_THRESHOLD:

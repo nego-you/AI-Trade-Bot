@@ -54,6 +54,17 @@ jobs:
           # 必要に応じて、GitHub Actions上で実行するためのダミーファイルやディレクトリを作成
           mkdir -p .claude db/init
 
+      - name: Install and Start Ollama
+        if: env.MARKET_OPEN == 'true'
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          # バックグラウンドでOllamaサーバーを起動
+          ollama serve &
+          # サーバーの起動完了を少し待つ
+          sleep 5
+          # モデルをpullする（llama3.2は軽量でActions向き）
+          ollama pull llama3.2
+
       - name: Run Trading Bot
         if: env.MARKET_OPEN == 'true'
         env:
