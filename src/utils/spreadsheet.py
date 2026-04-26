@@ -1,6 +1,7 @@
 import json
 import os
 import datetime
+import zoneinfo
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google.oauth2 import service_account
@@ -136,7 +137,7 @@ def append_news_rows(news_items: list[dict]) -> bool:
         service = get_service()
         _ensure_headers(service)
 
-        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        now = datetime.datetime.now(zoneinfo.ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d %H:%M:%S')
         rows = [
             [
                 now,

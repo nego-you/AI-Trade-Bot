@@ -3,6 +3,7 @@ import logging
 import schedule
 import time
 import datetime
+import zoneinfo
 
 from src.agents.gemini_agent import decide_trade_with_gemini
 from src.agents.ollama_agent import evaluate_news_with_ollama
@@ -43,7 +44,7 @@ def _print_usage_stats() -> None:
 
 
 def run_trading_logic():
-    now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = datetime.datetime.now(zoneinfo.ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d %H:%M:%S')
     print(f"\n[{now}] 🤖 トレードロジックの実行を開始します...")
 
     # --------------------------------------------------
