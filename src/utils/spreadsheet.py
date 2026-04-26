@@ -21,6 +21,8 @@ SHEET_RANGE = f'{SHEET_NAME}!A1'
 FOCUS_SHEET_NAME = '注目銘柄'
 FOCUS_HEADERS = ['更新日時', '企業名', '証券コード', 'テーマ', '注目理由']
 FOCUS_TARGETS_FILE = 'ai_focus_targets.json'
+SIMULATION_SHEET_NAME = '売買シミュレーション'
+SIMULATION_HEADERS = ['企業名', '証券コード', 'BUY日時', 'BUY価格(円)', 'SELL日時', 'SELL価格(円)', '損益(円)', '損益(%)']
 
 # 列定義（順番と名前を変えたらここだけ直す）
 HEADERS = [
@@ -224,4 +226,92 @@ def update_focus_targets(targets: list[dict]) -> bool:
         return True
     except Exception as e:
         print(f"Focus Targets Spreadsheet Error: {e}")
+        return False
+
+
+def record_simulation(company_name: str, ticker: str, decision: str, price: float) -> bool:
+    """
+    売買シミュレーションシートを更新する。
+
+    - decision == 'BUY' : オープンポジションがなければ新規行を追加
+    - decision == 'SELL': オープンポジションがあればSELL価格・損益を書き込んでクローズ
+    同一銘柄のオープンポジションが既に存在する場合のBUY、
+    オープンポジションが存在しない場合のSELLはいずれもスキップ。
+    """
+    if not SPREADSHEET_ID:
+        return False
+
+    import logging
+    logger = logging.getLogger(__name__)
+    now = datetime.datetime.now(zoneinfo.ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d %H:%M:%S')
+
+    try:
+        service = get_service()
+        _ensure_sheet_exists(service, SIMULATION_SHEET_NAME)
+
+        # 現在のシート内容を取得
+        result = service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f'{SIMULATION_SHEET_NAME}!A:H'
+        ).execute()
+        rows = result.get('values', [])
+
+        # ヘッダーが正しくなければ初期化
+        if not rows or rows[0] != SIMULATION_HEADERS:
+            service.spreadsheets().values().clear(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f'{SIMULATION_SHEET_NAME}!A:H'
+            ).execute()
+            service.spreadsheets().values().update(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f'{SIMULATION_SHEET_NAME}!A1',
+                valueInputOption='USER_ENTERED',
+                body={'values': [SIMULATION_HEADERS]}
+            ).execute()
+            rows = [SIMULATION_HEADERS]
+
+        # オープンポジション（SELL日時が空の行）を検索
+        open_position = None
+        for i, row in enumerate(rows[1:], start=2):  # i = スプレッドシートの行番号
+            row_ticker   = row[1] if len(row) > 1 else ''
+            row_sell_date = row[4] if len(row) > 4 else ''
+            if row_ticker == ticker and not row_sell_date:
+                open_position = {
+                    'sheet_row': i,
+                    'buy_price': float(row[3]) if len(row) > 3 and row[3] else 0.0,
+                }
+                break
+
+        if decision == 'BUY':
+            if open_position:
+                logger.info("[Sim] %s はオープンポジションあり → BUYスキップ", ticker)
+                return True
+            service.spreadsheets().values().append(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f'{SIMULATION_SHEET_NAME}!A1',
+                valueInputOption='USER_ENTERED',
+                body={'values': [[company_name, ticker, now, price, '', '', '', '']]}
+            ).execute()
+            print(f"  [Sim] 📈 BUY記録: {company_name}({ticker}) @ {price:.1f}円")
+
+        elif decision == 'SELL':
+            if not open_position:
+                logger.info("[Sim] %s はオープンポジションなし → SELLスキップ", ticker)
+                return True
+            buy_price   = open_position['buy_price']
+            profit_yen  = round(price - buy_price, 1)
+            profit_pct  = round((price - buy_price) / buy_price * 100, 2) if buy_price > 0 else 0.0
+            sheet_row   = open_position['sheet_row']
+            service.spreadsheets().values().update(
+                spreadsheetId=SPREADSHEET_ID,
+                range=f'{SIMULATION_SHEET_NAME}!E{sheet_row}:H{sheet_row}',
+                valueInputOption='USER_ENTERED',
+                body={'values': [[now, price, profit_yen, profit_pct]]}
+            ).execute()
+            sign = "+" if profit_yen >= 0 else ""
+            print(f"  [Sim] 📉 SELL記録: {company_name}({ticker}) @ {price:.1f}円 (損益: {sign}{profit_yen}円 / {sign}{profit_pct}%)")
+
+        return True
+    except Exception as e:
+        print(f"Simulation Spreadsheet Error: {e}")
         return False

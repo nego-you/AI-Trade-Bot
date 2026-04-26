@@ -8,7 +8,7 @@ import zoneinfo
 from src.agents.gemini_agent import decide_trade_with_gemini, analyze_market_trends
 from src.agents.ollama_agent import evaluate_news_with_ollama
 from src.utils.scraper import fetch_latest_news
-from src.utils.spreadsheet import append_news_rows, update_focus_targets
+from src.utils.spreadsheet import append_news_rows, update_focus_targets, record_simulation
 from src.utils.notifier import send_gmail_alert
 from src.utils.usage_tracker import get_daily_stats, record_gemini_calls
 
@@ -99,6 +99,9 @@ def run_trading_logic():
                     if s_data:
                         stock_info = f"【株価: {s_data['current_price']:.1f} (前日比 {s_data['change_percent']:+.2f}%)】"
                         decision_reason = f"{stock_info} {decision_reason}"
+                        # 売買シミュレーション記録（BUY/SELLのみ、価格が取得できた場合）
+                        if decision in ('BUY', 'SELL'):
+                            record_simulation(company_name, str(ticker), decision, s_data['current_price'])
         else:
             decision        = "HOLD"
             decision_reason = ""

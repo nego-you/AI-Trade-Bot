@@ -2,9 +2,12 @@ name: AI Trade Bot Daily Run
 
 on:
   schedule:
-    # 毎日平日の UTC 8:00 (JST 17:00) に実行
-    # 市場が閉じた後に1日のニュースをまとめて分析する想定
-    - cron: '0 8 * * 1-5'
+    # JST 8:30  = UTC 23:30（前日）→ 月〜金のJST朝の実行は日〜木のUTC深夜
+    - cron: '30 23 * * 0-4'
+    # JST 12:30 = UTC 3:30
+    - cron: '30 3 * * 1-5'
+    # JST 14:30 = UTC 5:30
+    - cron: '30 5 * * 1-5'
   workflow_dispatch:
     # GitHubの画面から手動で実行可能にするための設定
 
