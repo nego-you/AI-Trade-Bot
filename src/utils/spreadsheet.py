@@ -18,6 +18,9 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
 SHEET_NAME = 'シート1'
 SHEET_RANGE = f'{SHEET_NAME}!A1'
+FOCUS_SHEET_NAME = '注目銘柄'
+FOCUS_HEADERS = ['更新日時', '企業名', '証券コード', 'テーマ', '注目理由']
+FOCUS_TARGETS_FILE = 'ai_focus_targets.json'
 
 # 列定義（順番と名前を変えたらここだけ直す）
 HEADERS = [
@@ -80,6 +83,16 @@ def get_service():
 def _get_first_sheet_id(service) -> int:
     meta = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
     return meta['sheets'][0]['properties']['sheetId']
+
+
+def _ensure_sheet_exists(service, sheet_name: str) -> None:
+    meta = service.spreadsheets().get(spreadsheetId=SPREADSHEET_ID).execute()
+    exists = any(s['properties']['title'] == sheet_name for s in meta['sheets'])
+    if not exists:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=SPREADSHEET_ID,
+            body={'requests': [{'addSheet': {'properties': {'title': sheet_name}}}]}
+        ).execute()
 
 
 def _ensure_headers(service) -> None:
@@ -162,4 +175,53 @@ def append_news_rows(news_items: list[dict]) -> bool:
         return True
     except Exception as e:
         print(f"Spreadsheet Error: {e}")
+        return False
+
+
+def update_focus_targets(targets: list[dict]) -> bool:
+    """
+    注目銘柄シートを最新内容で上書きし、ai_focus_targets.json とも同期する。
+
+    targets の各 dict キー: company_name, ticker, theme, reason
+    """
+    now = datetime.datetime.now(zoneinfo.ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d %H:%M:%S')
+
+    # ローカルファイルへ同期（GitHub Actions では ephemeral だが参照用として残す）
+    try:
+        with open(FOCUS_TARGETS_FILE, 'w', encoding='utf-8') as f:
+            json.dump({"updated_at": now, "targets": targets}, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        print(f"ai_focus_targets.json 書き込み失敗: {e}")
+
+    if not SPREADSHEET_ID:
+        return False
+
+    try:
+        service = get_service()
+        _ensure_sheet_exists(service, FOCUS_SHEET_NAME)
+
+        rows = [FOCUS_HEADERS] + [
+            [
+                now,
+                t.get('company_name', ''),
+                str(t.get('ticker') or ''),
+                t.get('theme', ''),
+                t.get('reason', ''),
+            ]
+            for t in targets
+        ]
+
+        service.spreadsheets().values().clear(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f'{FOCUS_SHEET_NAME}!A:E'
+        ).execute()
+        service.spreadsheets().values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f'{FOCUS_SHEET_NAME}!A1',
+            valueInputOption='USER_ENTERED',
+            body={'values': rows}
+        ).execute()
+        return True
+    except Exception as e:
+        print(f"Focus Targets Spreadsheet Error: {e}")
         return False

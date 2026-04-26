@@ -145,6 +145,60 @@ def decide_trade_with_gemini(news_text: str, panic_score: int) -> str:
         logger.error("Error communicating with Gemini API: %s", e)
         return json.dumps({"error": f"Error communicating with Gemini API: {e}"})
 
+def analyze_market_trends(high_panic_titles: list[str]) -> str:
+    """
+    高パニックニュース群（パニック度70以上）を一括分析し、注目テーマと銘柄を抽出する。
+
+    Returns JSON:
+    {"targets": [{"company_name": "...", "ticker": "...", "theme": "...", "reason": "..."}]}
+    """
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return json.dumps({"error": "GEMINI_API_KEY is not set"})
+
+    client = genai.Client(api_key=api_key)
+    news_block = "\n".join(f"- {t}" for t in high_panic_titles)
+
+    system_instruction = """あなたはマクロ市場のトレンドを読む専門のクオンツ・ストラテジストです。
+複数の重要ニュース（パニック度70以上）を俯瞰し、現在の市場で注目すべきテーマや銘柄を抽出してください。
+
+【分析観点】
+- 資金が流入しているテーマ・セクターはどこか？
+- パニック・リスクが集中しているセクターはどこか？
+- 上記を踏まえて今後注目すべき日本の上場企業を3〜5社挙げる。
+
+【出力要件】
+以下のJSONフォーマットのみで出力してください。余分なテキストやMarkdownは含めないでください。
+{
+  "targets": [
+    {
+      "company_name": "企業名",
+      "ticker": "証券コード または null",
+      "theme": "関連テーマ（例: 半導体, 防衛, AI）",
+      "reason": "注目理由（1〜2文）"
+    }
+  ]
+}"""
+
+    prompt = f"以下の重要ニュース群を分析し、注目銘柄を抽出してください:\n{news_block}"
+
+    try:
+        chat = client.chats.create(model=GEMINI_MODEL, config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+            temperature=0.2,
+        ))
+        response = chat.send_message(prompt)
+        result_text = (response.text or "").strip()
+        if result_text.startswith("```json"):
+            result_text = result_text.replace("```json", "").replace("```", "").strip()
+        elif result_text.startswith("```"):
+            result_text = result_text.replace("```", "").strip()
+        return result_text
+    except Exception as e:
+        logger.error("Error in analyze_market_trends: %s", e)
+        return json.dumps({"error": f"Error communicating with Gemini API: {e}"})
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     test_news = "ソニーグループは本日、新型のエンターテインメントロボットを発表。初年度の販売目標を大きく上回る予約を記録しており、来期の業績を押し上げる見込みだ。"

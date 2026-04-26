@@ -5,10 +5,10 @@ import time
 import datetime
 import zoneinfo
 
-from src.agents.gemini_agent import decide_trade_with_gemini
+from src.agents.gemini_agent import decide_trade_with_gemini, analyze_market_trends
 from src.agents.ollama_agent import evaluate_news_with_ollama
 from src.utils.scraper import fetch_latest_news
-from src.utils.spreadsheet import append_news_rows
+from src.utils.spreadsheet import append_news_rows, update_focus_targets
 from src.utils.notifier import send_gmail_alert
 from src.utils.usage_tracker import get_daily_stats, record_gemini_calls
 
@@ -120,7 +120,27 @@ def run_trading_logic():
         print(f"  {icon} [{news['source']}] パニック度:{panic_score:3d} {decision:<5} {title[:45]}")
 
     # --------------------------------------------------
-    # 3. スプレッドシートへ一括記録（1ニュース = 1レコード）
+    # 3. 高パニックニュース群からトレンド分析 → 注目銘柄シート＆JSON 更新
+    # --------------------------------------------------
+    high_panic_titles = [item['title'] for item in items if item['panic_score'] >= PANIC_THRESHOLD]
+    if high_panic_titles:
+        print(f"\n📊 {len(high_panic_titles)} 件の高パニックニュースからトレンドを分析中...")
+        trend_result = _parse_json(analyze_market_trends(high_panic_titles))
+        record_gemini_calls(1)
+        time.sleep(4)
+        if 'error' not in trend_result:
+            targets = trend_result.get('targets', [])
+            if update_focus_targets(targets):
+                print(f"✅ 注目銘柄 {len(targets)} 件をスプレッドシート「注目銘柄」シートと ai_focus_targets.json に記録しました。")
+                for t in targets:
+                    print(f"  📌 [{t.get('theme', '')}] {t.get('company_name', '')} ({t.get('ticker') or 'N/A'}): {t.get('reason', '')[:50]}")
+        else:
+            print(f"❌ トレンド分析エラー: {trend_result.get('error', '')}")
+    else:
+        print("📊 パニック閾値以上のニュースがないため、監視銘柄の更新をスキップしました。")
+
+    # --------------------------------------------------
+    # 4. スプレッドシートへ一括記録（1ニュース = 1レコード）
     # --------------------------------------------------
     if append_news_rows(items):
         print(f"✅ {len(items)} 件をスプレッドシートへ記録しました。")
@@ -128,7 +148,7 @@ def run_trading_logic():
         print("❌ スプレッドシートへの記録に失敗しました。")
 
     # --------------------------------------------------
-    # 4. アラート対象があれば 1 通にまとめて Gmail 送信
+    # 5. アラート対象があれば 1 通にまとめて Gmail 送信
     #    （PANIC_THRESHOLD を超えて BUY でも ALERT_THRESHOLD 未満は送信しない）
     # --------------------------------------------------
     if alert_targets:
@@ -138,7 +158,7 @@ def run_trading_logic():
         print(f"📭 ALERT_THRESHOLD({ALERT_THRESHOLD}) 以上の BUY シグナルはありませんでした。")
 
     # --------------------------------------------------
-    # 5. Gemini API 無料枠の残量を表示
+    # 6. Gemini API 無料枠の残量を表示
     # --------------------------------------------------
     _print_usage_stats()
 
