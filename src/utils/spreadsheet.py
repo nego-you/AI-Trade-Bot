@@ -1,7 +1,9 @@
+import json
 import os
 import datetime
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+from google.oauth2 import service_account
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from dotenv import load_dotenv
@@ -31,6 +33,14 @@ HEADERS = [
 
 
 def get_service():
+    # GitHub Actions 等の CI 環境ではサービスアカウント認証を優先する
+    sa_json = os.getenv('GOOGLE_SERVICE_ACCOUNT_JSON')
+    if sa_json:
+        info = json.loads(sa_json)
+        creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+        return build('sheets', 'v4', credentials=creds)
+
+    # ローカル開発用 OAuth2 フロー
     creds = None
     if os.path.exists('token.json'):
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)

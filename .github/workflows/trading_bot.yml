@@ -71,10 +71,10 @@ jobs:
         if: env.MARKET_OPEN == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          # その他、必要なシークレット環境変数があればここに追加
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
           # GMAIL_USER: ${{ secrets.GMAIL_USER }}
           # GMAIL_PASS: ${{ secrets.GMAIL_PASS }}
-          # SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
         run: |
           # 1回のみ実行するフラグをつけて起動
           python main.py --run-once
