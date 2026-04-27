@@ -22,7 +22,18 @@ FOCUS_SHEET_NAME = '注目銘柄'
 FOCUS_HEADERS = ['更新日時', '企業名', '証券コード', 'テーマ', '注目理由']
 FOCUS_TARGETS_FILE = 'ai_focus_targets.json'
 SIMULATION_SHEET_NAME = '売買シミュレーション'
-SIMULATION_HEADERS = ['企業名', '証券コード', 'BUY日時', 'BUY価格(円)', 'SELL日時', 'SELL価格(円)', '損益(円)', '損益(%)']
+SIMULATION_HEADERS = [
+    '企業名', '証券コード',
+    'BUY日時', 'BUY価格(円)',
+    '保有予定日数', 'クローズ予定日', '利確目標(%)', '損切りライン(%)',
+    'SELL日時', 'SELL理由', 'SELL価格(円)', '損益(円)', '損益(%)',
+]
+# 列インデックス定数（ヘッダー変更時はここだけ直す）
+_SIM_COL_SELL_DATE   = 8   # I列
+_SIM_COL_SELL_REASON = 9   # J列
+_SIM_COL_SELL_PRICE  = 10  # K列
+_SIM_COL_PROFIT_YEN  = 11  # L列
+_SIM_COL_PROFIT_PCT  = 12  # M列
 
 # 列定義（順番と名前を変えたらここだけ直す）
 HEADERS = [
@@ -229,87 +240,161 @@ def update_focus_targets(targets: list[dict]) -> bool:
         return False
 
 
-def record_simulation(company_name: str, ticker: str, decision: str, price: float) -> bool:
+def _sim_init_sheet(service) -> list:
+    """シートが存在しヘッダーが正しければ現在の行リストを返す。違えば初期化して返す。"""
+    _ensure_sheet_exists(service, SIMULATION_SHEET_NAME)
+    result = service.spreadsheets().values().get(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f'{SIMULATION_SHEET_NAME}!A:M'
+    ).execute()
+    rows = result.get('values', [])
+    if not rows or rows[0] != SIMULATION_HEADERS:
+        service.spreadsheets().values().clear(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f'{SIMULATION_SHEET_NAME}!A:M'
+        ).execute()
+        service.spreadsheets().values().update(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f'{SIMULATION_SHEET_NAME}!A1',
+            valueInputOption='USER_ENTERED',
+            body={'values': [SIMULATION_HEADERS]}
+        ).execute()
+        return [SIMULATION_HEADERS]
+    return rows
+
+
+def _find_open_position(rows: list, ticker: str) -> dict | None:
+    """SELL日時（I列=インデックス8）が空の行を検索して返す。"""
+    for i, row in enumerate(rows[1:], start=2):
+        if (len(row) > 1 and row[1] == ticker
+                and (len(row) <= _SIM_COL_SELL_DATE or not row[_SIM_COL_SELL_DATE])):
+            return {
+                'sheet_row':      i,
+                'buy_price':      float(row[3]) if len(row) > 3 and row[3] else 0.0,
+                'take_profit_pct': float(row[6]) if len(row) > 6 and row[6] else 15.0,
+                'stop_loss_pct':  float(row[7]) if len(row) > 7 and row[7] else 10.0,
+                'close_date':     row[5] if len(row) > 5 else '',
+                'company_name':   row[0] if row else '',
+            }
+    return None
+
+
+def _close_position(service, pos: dict, sell_price: float, sell_reason: str, now: str) -> None:
+    """オープンポジションをクローズし、SELL列（I〜M列）を書き込む。"""
+    buy_price  = pos['buy_price']
+    profit_yen = round(sell_price - buy_price, 1)
+    profit_pct = round((sell_price - buy_price) / buy_price * 100, 2) if buy_price > 0 else 0.0
+    row = pos['sheet_row']
+    col_start  = chr(ord('A') + _SIM_COL_SELL_DATE)   # I
+    col_end    = chr(ord('A') + _SIM_COL_PROFIT_PCT)   # M
+    service.spreadsheets().values().update(
+        spreadsheetId=SPREADSHEET_ID,
+        range=f"{SIMULATION_SHEET_NAME}!{col_start}{row}:{col_end}{row}",
+        valueInputOption='USER_ENTERED',
+        body={'values': [[now, sell_reason, sell_price, profit_yen, profit_pct]]}
+    ).execute()
+    sign = "+" if profit_yen >= 0 else ""
+    print(f"  [Sim] 📉 SELL({sell_reason}): {pos.get('company_name','')}({pos['sheet_row']}) "
+          f"@ {sell_price:.1f}円 (損益: {sign}{profit_yen}円 / {sign}{profit_pct}%)")
+
+
+def get_open_positions() -> list[dict]:
+    """
+    売買シミュレーションシートからオープンポジション一覧を返す。
+    自動クローズチェック（main.py）から呼び出す用。
+    """
+    if not SPREADSHEET_ID:
+        return []
+    try:
+        service = get_service()
+        rows = _sim_init_sheet(service)
+        positions = []
+        for i, row in enumerate(rows[1:], start=2):
+            if (len(row) > 1
+                    and (len(row) <= _SIM_COL_SELL_DATE or not row[_SIM_COL_SELL_DATE])):
+                positions.append({
+                    'sheet_row':       i,
+                    'company_name':    row[0] if len(row) > 0 else '',
+                    'ticker':          row[1] if len(row) > 1 else '',
+                    'buy_price':       float(row[3]) if len(row) > 3 and row[3] else 0.0,
+                    'close_date':      row[5] if len(row) > 5 else '',
+                    'take_profit_pct': float(row[6]) if len(row) > 6 and row[6] else 15.0,
+                    'stop_loss_pct':   float(row[7]) if len(row) > 7 and row[7] else 10.0,
+                })
+        return positions
+    except Exception as e:
+        print(f"get_open_positions Error: {e}")
+        return []
+
+
+def close_open_position(pos: dict, sell_price: float, sell_reason: str) -> bool:
+    """自動クローズ（利確・損切り・期限到来）用のクローズ関数。"""
+    if not SPREADSHEET_ID:
+        return False
+    now = datetime.datetime.now(zoneinfo.ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        service = get_service()
+        _close_position(service, pos, sell_price, sell_reason, now)
+        return True
+    except Exception as e:
+        print(f"close_open_position Error: {e}")
+        return False
+
+
+def record_simulation(
+    company_name: str,
+    ticker: str,
+    decision: str,
+    price: float,
+    holding_days: int = 3,
+    take_profit_pct: float = 15.0,
+    stop_loss_pct: float = 10.0,
+) -> bool:
     """
     売買シミュレーションシートを更新する。
 
-    - decision == 'BUY' : オープンポジションがなければ新規行を追加
-    - decision == 'SELL': オープンポジションがあればSELL価格・損益を書き込んでクローズ
-    同一銘柄のオープンポジションが既に存在する場合のBUY、
-    オープンポジションが存在しない場合のSELLはいずれもスキップ。
+    - BUY : オープンポジションがなければ新規行を追加（保有条件を記録）
+    - SELL: オープンポジションがあれば AIシグナルとしてクローズ
+    同一銘柄のオープンポジションが既存の場合のBUY、
+    オープンポジションがない場合のSELLはスキップ。
     """
     if not SPREADSHEET_ID:
         return False
 
     import logging
-    logger = logging.getLogger(__name__)
+    _logger = logging.getLogger(__name__)
     now = datetime.datetime.now(zoneinfo.ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d %H:%M:%S')
+    jst = zoneinfo.ZoneInfo('Asia/Tokyo')
 
     try:
         service = get_service()
-        _ensure_sheet_exists(service, SIMULATION_SHEET_NAME)
-
-        # 現在のシート内容を取得
-        result = service.spreadsheets().values().get(
-            spreadsheetId=SPREADSHEET_ID,
-            range=f'{SIMULATION_SHEET_NAME}!A:H'
-        ).execute()
-        rows = result.get('values', [])
-
-        # ヘッダーが正しくなければ初期化
-        if not rows or rows[0] != SIMULATION_HEADERS:
-            service.spreadsheets().values().clear(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f'{SIMULATION_SHEET_NAME}!A:H'
-            ).execute()
-            service.spreadsheets().values().update(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f'{SIMULATION_SHEET_NAME}!A1',
-                valueInputOption='USER_ENTERED',
-                body={'values': [SIMULATION_HEADERS]}
-            ).execute()
-            rows = [SIMULATION_HEADERS]
-
-        # オープンポジション（SELL日時が空の行）を検索
-        open_position = None
-        for i, row in enumerate(rows[1:], start=2):  # i = スプレッドシートの行番号
-            row_ticker   = row[1] if len(row) > 1 else ''
-            row_sell_date = row[4] if len(row) > 4 else ''
-            if row_ticker == ticker and not row_sell_date:
-                open_position = {
-                    'sheet_row': i,
-                    'buy_price': float(row[3]) if len(row) > 3 and row[3] else 0.0,
-                }
-                break
+        rows = _sim_init_sheet(service)
+        pos = _find_open_position(rows, ticker)
 
         if decision == 'BUY':
-            if open_position:
-                logger.info("[Sim] %s はオープンポジションあり → BUYスキップ", ticker)
+            if pos:
+                _logger.info("[Sim] %s はオープンポジションあり → BUYスキップ", ticker)
                 return True
+            close_date = (datetime.datetime.now(jst) + datetime.timedelta(days=holding_days)).strftime('%Y-%m-%d')
             service.spreadsheets().values().append(
                 spreadsheetId=SPREADSHEET_ID,
                 range=f'{SIMULATION_SHEET_NAME}!A1',
                 valueInputOption='USER_ENTERED',
-                body={'values': [[company_name, ticker, now, price, '', '', '', '']]}
+                body={'values': [[
+                    company_name, ticker,
+                    now, price,
+                    holding_days, close_date, take_profit_pct, stop_loss_pct,
+                    '', '', '', '', '',
+                ]]}
             ).execute()
-            print(f"  [Sim] 📈 BUY記録: {company_name}({ticker}) @ {price:.1f}円")
+            print(f"  [Sim] 📈 BUY記録: {company_name}({ticker}) @ {price:.1f}円 "
+                  f"[利確+{take_profit_pct}% / 損切-{stop_loss_pct}% / {holding_days}日]")
 
         elif decision == 'SELL':
-            if not open_position:
-                logger.info("[Sim] %s はオープンポジションなし → SELLスキップ", ticker)
+            if not pos:
+                _logger.info("[Sim] %s はオープンポジションなし → SELLスキップ", ticker)
                 return True
-            buy_price   = open_position['buy_price']
-            profit_yen  = round(price - buy_price, 1)
-            profit_pct  = round((price - buy_price) / buy_price * 100, 2) if buy_price > 0 else 0.0
-            sheet_row   = open_position['sheet_row']
-            service.spreadsheets().values().update(
-                spreadsheetId=SPREADSHEET_ID,
-                range=f'{SIMULATION_SHEET_NAME}!E{sheet_row}:H{sheet_row}',
-                valueInputOption='USER_ENTERED',
-                body={'values': [[now, price, profit_yen, profit_pct]]}
-            ).execute()
-            sign = "+" if profit_yen >= 0 else ""
-            print(f"  [Sim] 📉 SELL記録: {company_name}({ticker}) @ {price:.1f}円 (損益: {sign}{profit_yen}円 / {sign}{profit_pct}%)")
+            _close_position(service, pos, price, 'AIシグナル', now)
 
         return True
     except Exception as e:

@@ -8,7 +8,7 @@ import zoneinfo
 from src.agents.gemini_agent import decide_trade_with_gemini, analyze_market_trends
 from src.agents.ollama_agent import evaluate_news_with_ollama
 from src.utils.scraper import fetch_latest_news
-from src.utils.spreadsheet import append_news_rows, update_focus_targets, record_simulation
+from src.utils.spreadsheet import append_news_rows, update_focus_targets, record_simulation, get_open_positions, close_open_position
 from src.utils.notifier import send_gmail_alert
 from src.utils.usage_tracker import get_daily_stats, record_gemini_calls
 
@@ -43,9 +43,58 @@ def _print_usage_stats() -> None:
         print(f"⚠️  残り {remaining} 回で有償プランに切り替わります。")
 
 
+def _check_position_auto_close() -> None:
+    """
+    オープンポジションを取得し、以下の条件でシミュレーション自動クローズする。
+      - 利確: 現在値 >= BUY価格 × (1 + take_profit_pct/100)
+      - 損切り: 現在値 <= BUY価格 × (1 - stop_loss_pct/100)
+      - 期限到来: 本日 >= クローズ予定日
+    """
+    from src.utils.stock_data import fetch_stock_data
+    positions = get_open_positions()
+    if not positions:
+        return
+
+    print(f"\n🔍 オープンポジション {len(positions)} 件をチェック中...")
+    today = datetime.date.today()
+
+    for pos in positions:
+        ticker    = pos['ticker']
+        buy_price = pos['buy_price']
+        if not ticker or buy_price <= 0:
+            continue
+
+        s_data = fetch_stock_data(ticker)
+        if not s_data:
+            continue
+
+        current = s_data['current_price']
+        chg_pct = (current - buy_price) / buy_price * 100
+
+        sell_reason = None
+        if chg_pct >= pos['take_profit_pct']:
+            sell_reason = f"利確(+{chg_pct:.1f}%)"
+        elif chg_pct <= -pos['stop_loss_pct']:
+            sell_reason = f"損切り({chg_pct:.1f}%)"
+        elif pos['close_date']:
+            try:
+                if today >= datetime.date.fromisoformat(pos['close_date']):
+                    sell_reason = "期限到来"
+            except ValueError:
+                pass
+
+        if sell_reason:
+            close_open_position(pos, current, sell_reason)
+
+
 def run_trading_logic():
     now = datetime.datetime.now(zoneinfo.ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d %H:%M:%S')
     print(f"\n[{now}] 🤖 トレードロジックの実行を開始します...")
+
+    # --------------------------------------------------
+    # 0. オープンポジションの自動クローズチェック
+    # --------------------------------------------------
+    _check_position_auto_close()
 
     # --------------------------------------------------
     # 1. 全フィードからニュースを取得
@@ -87,11 +136,14 @@ def run_trading_logic():
                 decision_reason = f"Gemini エラー（{gemini.get('error', '')}）"
                 logger.warning("Gemini error for '%s': %s", title[:30], gemini['error'])
             else:
-                decision        = gemini.get('signal', 'HOLD')
-                decision_reason = gemini.get('reason', '')
-                company_name    = gemini.get('company_name', '')
-                ticker          = gemini.get('ticker')
-                
+                decision         = gemini.get('signal', 'HOLD')
+                decision_reason  = gemini.get('reason', '')
+                company_name     = gemini.get('company_name', '')
+                ticker           = gemini.get('ticker')
+                holding_days     = int(gemini.get('holding_days', 3))
+                take_profit_pct  = float(gemini.get('take_profit_pct', 15.0))
+                stop_loss_pct    = float(gemini.get('stop_loss_pct', 10.0))
+
                 # 株価データの取得と連携
                 if ticker and str(ticker).lower() != 'null':
                     from src.utils.stock_data import fetch_stock_data
@@ -101,7 +153,12 @@ def run_trading_logic():
                         decision_reason = f"{stock_info} {decision_reason}"
                         # 売買シミュレーション記録（BUY/SELLのみ、価格が取得できた場合）
                         if decision in ('BUY', 'SELL'):
-                            record_simulation(company_name, str(ticker), decision, s_data['current_price'])
+                            record_simulation(
+                                company_name, str(ticker), decision, s_data['current_price'],
+                                holding_days=holding_days,
+                                take_profit_pct=take_profit_pct,
+                                stop_loss_pct=stop_loss_pct,
+                            )
         else:
             decision        = "HOLD"
             decision_reason = ""

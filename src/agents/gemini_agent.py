@@ -120,8 +120,17 @@ def decide_trade_with_gemini(news_text: str, panic_score: int) -> str:
   "ticker": "証券コード(文字列) または null",
   "signal": "BUY",
   "reason": "判断の根拠となる推論プロセス（2〜3文）",
-  "confidence": 80
-}"""
+  "confidence": 80,
+  "holding_days": 3,
+  "take_profit_pct": 12.0,
+  "stop_loss_pct": 7.0
+}
+
+各フィールドの設定基準:
+- holding_days: ニュースの影響が続くと予測される日数（1〜30の整数）。短期材料なら1〜3日、中期トレンドなら5〜15日、構造的変化なら20〜30日。
+- take_profit_pct: このニュースの性質・ボラティリティ・確度から判断した利確目標（5.0〜30.0の正の数値）。確度が高く値幅が見込めるほど大きく設定。
+- stop_loss_pct: 損切りライン（3.0〜15.0の正の数値）。リスクが高いほど小さく設定してリスクを限定する。
+signal が HOLD の場合も全フィールドを出力すること（例: holding_days=1, take_profit_pct=5.0, stop_loss_pct=3.0）。"""
 
     prompt = f"以下のニュースと、市場のパニック度を分析してください。\n- ニュース: {news_text}\n- パニック度: {panic_score}"
 
