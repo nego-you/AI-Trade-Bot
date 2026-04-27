@@ -2,12 +2,12 @@ name: AI Trade Bot Daily Run
 
 on:
   schedule:
-    # JST 8:30  = UTC 23:30（前日）→ 月〜金のJST朝の実行は日〜木のUTC深夜
-    - cron: '30 23 * * 0-4'
-    # JST 12:30 = UTC 3:30
-    - cron: '30 3 * * 1-5'
-    # JST 14:30 = UTC 5:30
-    - cron: '30 5 * * 1-5'
+    # 目標 JST 8:30（GitHub Actions 約45分遅延を考慮し JST 7:45 = UTC 22:45 前日にトリガー）
+    - cron: '45 22 * * 0-4'
+    # 目標 JST 12:30（JST 11:45 = UTC 2:45）
+    - cron: '45 2 * * 1-5'
+    # 目標 JST 14:30（JST 13:45 = UTC 4:45）
+    - cron: '45 4 * * 1-5'
   workflow_dispatch:
     # GitHubの画面から手動で実行可能にするための設定
 
@@ -76,8 +76,9 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-          # GMAIL_USER: ${{ secrets.GMAIL_USER }}
-          # GMAIL_PASS: ${{ secrets.GMAIL_PASS }}
+          GMAIL_USER: ${{ secrets.GMAIL_USER }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          ALERT_RECEIVER: ${{ secrets.ALERT_RECEIVER }}
         run: |
           # 1回のみ実行するフラグをつけて起動
           python main.py --run-once
