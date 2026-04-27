@@ -16,7 +16,7 @@ load_dotenv()
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
 SPREADSHEET_ID = os.getenv('SPREADSHEET_ID')
-SHEET_NAME = 'シート1'
+SHEET_NAME = 'ニュース分析'
 SHEET_RANGE = f'{SHEET_NAME}!A1'
 FOCUS_SHEET_NAME = '注目銘柄'
 FOCUS_HEADERS = ['更新日時', '企業名', '証券コード', 'テーマ', '注目理由']
