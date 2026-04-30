@@ -32,5 +32,8 @@ token.json
 # API usage tracking (local only)
 usage.json
 
+# Streamlit secrets (never commit)
+.streamlit/secrets.toml
+
 # AI focus targets (synced to spreadsheet; local copy is ephemeral)
 ai_focus_targets.json
