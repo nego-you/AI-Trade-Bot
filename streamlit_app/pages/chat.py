@@ -1,3 +1,5 @@
+import json
+import re
 import streamlit as st
 from google import genai
 from google.genai import types
@@ -7,6 +9,7 @@ st.markdown(
     """
     <style>
     .sidebar-footer { font-size: 0.75rem; color: #888; margin-top: 2rem; }
+    .stock-card { background: #f0f7ff; border-radius: 8px; padding: 0.6rem 1rem; margin: 0.3rem 0; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -21,8 +24,20 @@ with st.sidebar:
         ["gemini-2.5-flash", "gemini-2.0-flash"],
         index=0,
     )
-
     temperature = st.slider("Temperature", 0.0, 1.0, 0.7, 0.05)
+
+    st.divider()
+
+    # 注目銘柄リストのサマリー
+    targets = st.session_state.get("focus_targets", [])
+    st.markdown(f"**📋 注目銘柄リスト：{len(targets)} 銘柄**")
+    if targets:
+        for t in targets:
+            st.caption(f"・{t['company_name']}（{t['ticker']}）")
+    else:
+        st.caption("まだ追加されていません")
+
+    st.divider()
 
     if st.button("🗑️ 会話をリセット", use_container_width=True):
         st.session_state.messages = []
@@ -36,16 +51,13 @@ with st.sidebar:
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.title("📈 TradeBot Assistant")
-st.caption("AIトレードボットについて何でも聞いてください。市場分析・銘柄調査・戦略の相談を受け付けます。")
+st.caption("銘柄について話しながら、気になった銘柄を「➕ 追加」ボタンで注目リストに追加できます。")
 
 # ── Session state ─────────────────────────────────────────────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = []
-
-# ── Render chat history ────────────────────────────────────────────────────────
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+if "focus_targets" not in st.session_state:
+    st.session_state.focus_targets = []
 
 # ── Gemini client ─────────────────────────────────────────────────────────────
 @st.cache_resource
@@ -59,13 +71,23 @@ def get_gemini_client() -> genai.Client:
 
 SYSTEM_PROMPT = """あなたは「TradeBot Assistant」です。
 ユーザーが運用している自動トレードボット（GitHub Actionsで稼働、Gemini APIでニュース分析）の
-専属アシスタントとして、以下の役割を担います。
+専属アシスタントとして、日本株の投資判断をサポートします。
 
 【役割】
 - 日本株の市場動向・個別銘柄に関する質問への回答
 - トレードボットの戦略ロジック（パニックスコア判定・BUY/SELL/HOLDシグナル）の説明
 - 投資判断の補助（注意: 最終判断は必ずユーザー自身が行うこと）
-- Python / GitHub Actions / Streamlit に関する技術的な質問への回答
+
+【銘柄提案のルール - 重要】
+会話の中で具体的な銘柄を推薦・提案する場合は、通常の回答文の末尾に必ず以下のブロックを追加してください。
+このブロックは提案する銘柄がある場合のみ出力し、一般的な質問への回答では出力不要です。
+
+```stocks
+[
+  {"company_name": "企業名", "ticker": "証券コード4桁", "theme": "テーマ", "reason": "注目理由1〜2文"},
+  {"company_name": "企業名2", "ticker": "証券コード4桁", "theme": "テーマ", "reason": "注目理由1〜2文"}
+]
+```
 
 【ガイドライン】
 - 日本語で回答する
@@ -74,19 +96,81 @@ SYSTEM_PROMPT = """あなたは「TradeBot Assistant」です。
 - 回答はMarkdownで整理して見やすく提示する"""
 
 
+STOCKS_PATTERN = re.compile(r"```stocks\s*(\[.*?\])\s*```", re.DOTALL)
+
+
+def parse_stocks(text: str) -> tuple[str, list[dict]]:
+    """
+    レスポンスから ```stocks [...] ``` ブロックを抽出し、
+    (表示用テキスト, 銘柄リスト) を返す。
+    """
+    match = STOCKS_PATTERN.search(text)
+    if not match:
+        return text, []
+
+    display_text = STOCKS_PATTERN.sub("", text).strip()
+    try:
+        stocks = json.loads(match.group(1))
+        if isinstance(stocks, list):
+            return display_text, stocks
+    except json.JSONDecodeError:
+        pass
+    return display_text, []
+
+
 def build_contents(messages: list[dict]) -> list[types.Content]:
     contents = []
     for m in messages:
         role = "user" if m["role"] == "user" else "model"
+        # Gemini に渡すのは表示テキスト（stocks ブロック除去済み）
         contents.append(
-            types.Content(role=role, parts=[types.Part(text=m["content"])])
+            types.Content(role=role, parts=[types.Part(text=m["display"])])
         )
     return contents
 
 
+def render_stock_buttons(stocks: list[dict], msg_idx: int):
+    """銘柄カードと「➕ 追加」ボタンを表示する。"""
+    if not stocks:
+        return
+    st.markdown("---")
+    st.markdown("**💡 提案銘柄 — ワンクリックでリストに追加できます**")
+    for j, stock in enumerate(stocks):
+        already = any(t["ticker"] == stock.get("ticker") for t in st.session_state.focus_targets)
+        with st.container():
+            col_text, col_btn = st.columns([5, 1])
+            with col_text:
+                st.markdown(
+                    f"**{stock.get('company_name', '')}**　`{stock.get('ticker', '')}`"
+                    + (f"　🏷️ {stock.get('theme', '')}" if stock.get("theme") else "")
+                )
+                if stock.get("reason"):
+                    st.caption(stock["reason"])
+            with col_btn:
+                if already:
+                    st.button("✅ 追加済", key=f"stock_{msg_idx}_{j}", disabled=True)
+                else:
+                    if st.button("➕ 追加", key=f"stock_{msg_idx}_{j}"):
+                        st.session_state.focus_targets.append({
+                            "company_name": stock.get("company_name", ""),
+                            "ticker":       stock.get("ticker", ""),
+                            "theme":        stock.get("theme", ""),
+                            "reason":       stock.get("reason", ""),
+                        })
+                        st.rerun()
+
+
+# ── Render chat history ────────────────────────────────────────────────────────
+for idx, msg in enumerate(st.session_state.messages):
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["display"])
+        if msg["role"] == "assistant" and msg.get("stocks"):
+            render_stock_buttons(msg["stocks"], idx)
+
 # ── Chat input ────────────────────────────────────────────────────────────────
-if prompt := st.chat_input("メッセージを入力してください…"):
-    st.session_state.messages.append({"role": "user", "content": prompt})
+if prompt := st.chat_input("銘柄・市場・戦略について聞いてください…"):
+    user_msg = {"role": "user", "display": prompt, "stocks": []}
+    st.session_state.messages.append(user_msg)
     with st.chat_message("user"):
         st.markdown(prompt)
 
@@ -109,11 +193,25 @@ if prompt := st.chat_input("メッセージを入力してください…"):
             for chunk in stream:
                 if chunk.text:
                     full_response += chunk.text
-                    placeholder.markdown(full_response + "▌")
-            placeholder.markdown(full_response)
+                    # ストリーミング中は stocks ブロックを隠して表示
+                    preview, _ = parse_stocks(full_response)
+                    placeholder.markdown(preview + "▌")
+
+            display_text, stocks = parse_stocks(full_response)
+            placeholder.markdown(display_text)
+
+            if stocks:
+                render_stock_buttons(stocks, len(st.session_state.messages))
 
         except Exception as e:
-            full_response = f"⚠️ エラーが発生しました: {e}"
-            placeholder.markdown(full_response)
+            display_text = f"⚠️ エラーが発生しました: {e}"
+            stocks = []
+            placeholder.markdown(display_text)
 
-    st.session_state.messages.append({"role": "assistant", "content": full_response})
+    st.session_state.messages.append({
+        "role":    "assistant",
+        "display": display_text,
+        "stocks":  stocks,
+        # Gemini に返す用に元のレスポンス（stocks ブロック含まない）を保持
+        "raw":     full_response,
+    })
