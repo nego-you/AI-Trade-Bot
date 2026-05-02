@@ -1,8 +1,17 @@
 import json
 import re
+import sys
+import os
 import streamlit as st
 from google import genai
 from google.genai import types
+
+# streamlit_app/ をパスに追加（stock_utils をインポートするため）
+_app_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _app_dir not in sys.path:
+    sys.path.insert(0, _app_dir)
+
+from stock_utils import render_stock_card
 
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown(
@@ -130,34 +139,13 @@ def build_contents(messages: list[dict]) -> list[types.Content]:
 
 
 def render_stock_buttons(stocks: list[dict], msg_idx: int):
-    """銘柄カードと「➕ 追加」ボタンを表示する。"""
+    """銘柄カード（株価・チャット・追加ボタン）を表示する。"""
     if not stocks:
         return
     st.markdown("---")
-    st.markdown("**💡 提案銘柄 — ワンクリックでリストに追加できます**")
+    st.markdown("**💡 提案銘柄 — 株価・チャートを確認してワンクリックで追加できます**")
     for j, stock in enumerate(stocks):
-        already = any(t["ticker"] == stock.get("ticker") for t in st.session_state.focus_targets)
-        with st.container():
-            col_text, col_btn = st.columns([5, 1])
-            with col_text:
-                st.markdown(
-                    f"**{stock.get('company_name', '')}**　`{stock.get('ticker', '')}`"
-                    + (f"　🏷️ {stock.get('theme', '')}" if stock.get("theme") else "")
-                )
-                if stock.get("reason"):
-                    st.caption(stock["reason"])
-            with col_btn:
-                if already:
-                    st.button("✅ 追加済", key=f"stock_{msg_idx}_{j}", disabled=True)
-                else:
-                    if st.button("➕ 追加", key=f"stock_{msg_idx}_{j}"):
-                        st.session_state.focus_targets.append({
-                            "company_name": stock.get("company_name", ""),
-                            "ticker":       stock.get("ticker", ""),
-                            "theme":        stock.get("theme", ""),
-                            "reason":       stock.get("reason", ""),
-                        })
-                        st.rerun()
+        render_stock_card(stock, msg_idx, j)
 
 
 # ── Render chat history ────────────────────────────────────────────────────────
