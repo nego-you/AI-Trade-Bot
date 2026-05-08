@@ -97,6 +97,14 @@ def render_stock_card(stock: dict, msg_idx: int, stock_idx: int):
                     })
                     st.rerun()
 
+        # ── TradingView リンク ────────────────────────────────
+        raw_ticker = str(ticker).replace(".T", "")
+        if raw_ticker.isdigit() and len(raw_ticker) == 4:
+            tv_url = f"https://jp.tradingview.com/chart/?symbol=TSE:{raw_ticker}"
+        else:
+            tv_url = f"https://jp.tradingview.com/chart/?symbol={raw_ticker}"
+        st.link_button("📊 TradingView で詳細チャートを開く", tv_url, use_container_width=True)
+
         # ── 株価情報 ─────────────────────────────────────────
         info = fetch_stock_info(ticker)
         if info:
