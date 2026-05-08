@@ -115,6 +115,13 @@ else:
                 )
                 if target.get("reason"):
                     st.caption(target["reason"])
+                # TradingView リンク
+                raw_ticker = str(target['ticker']).replace(".T", "")
+                if raw_ticker.isdigit() and len(raw_ticker) == 4:
+                    tv_url = f"https://jp.tradingview.com/chart/?symbol=TSE:{raw_ticker}"
+                else:
+                    tv_url = f"https://jp.tradingview.com/chart/?symbol={raw_ticker}"
+                st.link_button("📊 TradingView", tv_url)
             with col_del:
                 if st.button("🗑️", key=f"del_{i}", help="削除"):
                     st.session_state.focus_targets.pop(i)
