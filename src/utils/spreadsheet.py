@@ -298,6 +298,49 @@ def _close_position(service, pos: dict, sell_price: float, sell_reason: str, now
           f"@ {sell_price:.1f}円 (損益: {sign}{profit_yen}円 / {sign}{profit_pct}%)")
 
 
+def get_simulation_history() -> list[dict]:
+    """
+    売買シミュレーションシートの全行を辞書リストで返す（ヘッダー行を除く）。
+    オープン・クローズ両方含む。
+    """
+    if not SPREADSHEET_ID:
+        return []
+    try:
+        service = get_service()
+        result = service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=f'{SIMULATION_SHEET_NAME}!A:M'
+        ).execute()
+        rows = result.get('values', [])
+        if not rows or len(rows) < 2:
+            return []
+
+        def _safe(row, idx, default=''):
+            return row[idx] if len(row) > idx else default
+
+        records = []
+        for row in rows[1:]:
+            records.append({
+                'company_name':    _safe(row, 0),
+                'ticker':          _safe(row, 1),
+                'buy_date':        _safe(row, 2),
+                'buy_price':       float(_safe(row, 3, 0) or 0),
+                'holding_days':    int(_safe(row, 4, 0) or 0),
+                'close_date':      _safe(row, 5),
+                'take_profit_pct': float(_safe(row, 6, 0) or 0),
+                'stop_loss_pct':   float(_safe(row, 7, 0) or 0),
+                'sell_date':       _safe(row, 8),
+                'sell_reason':     _safe(row, 9),
+                'sell_price':      float(_safe(row, 10, 0) or 0),
+                'profit_yen':      float(_safe(row, 11, 0) or 0),
+                'profit_pct':      float(_safe(row, 12, 0) or 0),
+            })
+        return records
+    except Exception as e:
+        print(f"get_simulation_history Error: {e}")
+        return []
+
+
 def get_open_positions() -> list[dict]:
     """
     売買シミュレーションシートからオープンポジション一覧を返す。
