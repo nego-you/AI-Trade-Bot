@@ -144,21 +144,28 @@ def run_trading_logic():
                 take_profit_pct  = float(gemini.get('take_profit_pct', 15.0))
                 stop_loss_pct    = float(gemini.get('stop_loss_pct', 10.0))
 
-                # 株価データの取得と連携
-                if ticker and str(ticker).lower() != 'null':
-                    from src.utils.stock_data import fetch_stock_data
-                    s_data = fetch_stock_data(str(ticker))
+                # 株価データの取得（取得できなくても記録はする）
+                from src.utils.stock_data import fetch_stock_data
+                effective_ticker = str(ticker) if ticker and str(ticker).lower() != 'null' else None
+                buy_price = 0.0
+                if effective_ticker:
+                    s_data = fetch_stock_data(effective_ticker)
                     if s_data:
-                        stock_info = f"【株価: {s_data['current_price']:.1f} (前日比 {s_data['change_percent']:+.2f}%)】"
+                        buy_price = s_data['current_price']
+                        stock_info = f"【株価: {buy_price:.1f} (前日比 {s_data['change_percent']:+.2f}%)】"
                         decision_reason = f"{stock_info} {decision_reason}"
-                        # 売買シミュレーション記録（BUY/SELLのみ、価格が取得できた場合）
-                        if decision in ('BUY', 'SELL'):
-                            record_simulation(
-                                company_name, str(ticker), decision, s_data['current_price'],
-                                holding_days=holding_days,
-                                take_profit_pct=take_profit_pct,
-                                stop_loss_pct=stop_loss_pct,
-                            )
+                    else:
+                        logger.warning("株価取得失敗（ticker=%s）。価格 0 で記録します。", effective_ticker)
+
+                # BUY/SELL は株価取得の成否にかかわらず必ず記録する
+                if decision in ('BUY', 'SELL') and company_name:
+                    sim_ticker = effective_ticker or company_name[:8]
+                    record_simulation(
+                        company_name, sim_ticker, decision, buy_price,
+                        holding_days=holding_days,
+                        take_profit_pct=take_profit_pct,
+                        stop_loss_pct=stop_loss_pct,
+                    )
         else:
             decision        = "HOLD"
             decision_reason = ""

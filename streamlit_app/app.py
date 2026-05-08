@@ -15,8 +15,9 @@ st.set_page_config(
 )
 
 # ── Navigation ────────────────────────────────────────────────────────────────
-chat_page   = st.Page("pages/chat.py",   title="チャット",     icon="💬", default=True)
-stocks_page = st.Page("pages/stocks.py", title="注目銘柄管理", icon="📋")
+chat_page       = st.Page("pages/chat.py",       title="チャット",       icon="💬", default=True)
+stocks_page     = st.Page("pages/stocks.py",     title="注目銘柄管理",   icon="📋")
+simulation_page = st.Page("pages/simulation.py", title="シミュレーション結果", icon="💹")
 
-pg = st.navigation([chat_page, stocks_page])
+pg = st.navigation([chat_page, stocks_page, simulation_page])
 pg.run()
