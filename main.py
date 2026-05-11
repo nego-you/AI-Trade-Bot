@@ -5,7 +5,7 @@ import time
 import datetime
 import zoneinfo
 
-from src.agents.gemini_agent import decide_trade_with_gemini, analyze_market_trends
+from src.agents.gemini_agent import decide_trade_batch_with_gemini, analyze_market_trends, BATCH_SIZE
 from src.agents.ollama_agent import evaluate_news_with_ollama
 from src.utils.scraper import fetch_latest_news
 from src.utils.spreadsheet import append_news_rows, update_focus_targets, record_simulation, get_open_positions, close_open_position
@@ -87,6 +87,17 @@ def _check_position_auto_close() -> None:
             close_open_position(pos, current, sell_reason)
 
 
+def _load_focus_targets() -> list[dict]:
+    """ai_focus_targets.json から注目銘柄リストを読み込む（存在しない場合は空リスト）。"""
+    try:
+        from src.utils.spreadsheet import FOCUS_TARGETS_FILE
+        with open(FOCUS_TARGETS_FILE, encoding='utf-8') as f:
+            data = json.load(f)
+        return data.get('targets', [])
+    except Exception:
+        return []
+
+
 def run_trading_logic():
     now = datetime.datetime.now(zoneinfo.ZoneInfo('Asia/Tokyo')).strftime('%Y-%m-%d %H:%M:%S')
     print(f"\n[{now}] 🤖 トレードロジックの実行を開始します...")
@@ -107,84 +118,102 @@ def run_trading_logic():
     print(f"📰 {len(news_list)} 件のニュースを取得しました。")
 
     # --------------------------------------------------
-    # 2. Gemini でパニックスコア評価 → 閾値超えはさらに詳細分析
+    # 2. フェーズ1: Ollama で全記事のパニックスコアを収集
     # --------------------------------------------------
-    items = []
-    alert_targets = []   # ALERT_THRESHOLD 以上かつ BUY のみ
-
+    print("🔍 Ollama でパニックスコアを評価中...")
     for news in news_list:
-        title = news['title']
-
-        # --- Ollama: パニック度スコアリング ---
-        ollama_panic = _parse_json(evaluate_news_with_ollama(title))
-        
+        ollama_panic = _parse_json(evaluate_news_with_ollama(news['title']))
         if 'error' in ollama_panic:
-            panic_score  = 0
-            panic_reason = f"Ollama未応答（{ollama_panic.get('error', '')}）"
-            logger.warning("Ollama error for panic score '%s': %s", title[:30], ollama_panic['error'])
+            news['panic_score']  = 0
+            news['panic_reason'] = f"Ollama未応答（{ollama_panic.get('error', '')}）"
+            logger.warning("Ollama error for '%s': %s", news['title'][:30], ollama_panic['error'])
         else:
-            panic_score  = int(ollama_panic.get('panic_score', 0))
-            panic_reason = ollama_panic.get('reason', '')
+            news['panic_score']  = int(ollama_panic.get('panic_score', 0))
+            news['panic_reason'] = ollama_panic.get('reason', '')
 
-        # --- Gemini: PANIC_THRESHOLD 以上のみ BUY/SKIP 判定 ---
-        if panic_score >= PANIC_THRESHOLD:
-            gemini = _parse_json(decide_trade_with_gemini(title, panic_score))
-            record_gemini_calls(1)
-            time.sleep(4) # API Rate Limit対策
-            if 'error' in gemini:
-                decision        = "ERROR"
-                decision_reason = f"Gemini エラー（{gemini.get('error', '')}）"
-                logger.warning("Gemini error for '%s': %s", title[:30], gemini['error'])
-            else:
-                decision         = gemini.get('signal', 'HOLD')
-                decision_reason  = gemini.get('reason', '')
-                company_name     = gemini.get('company_name', '')
-                ticker           = gemini.get('ticker')
-                holding_days     = int(gemini.get('holding_days', 3))
-                take_profit_pct  = float(gemini.get('take_profit_pct', 15.0))
-                stop_loss_pct    = float(gemini.get('stop_loss_pct', 10.0))
+    # --------------------------------------------------
+    # 3. フェーズ2: Gemini でバッチ一括判定（全記事対象）
+    # --------------------------------------------------
+    print(f"🤖 Gemini でバッチ判定中（{BATCH_SIZE} 件/リクエスト）...")
+    focus_targets = _load_focus_targets()
 
-                # 株価データの取得（取得できなくても記録はする）
-                from src.utils.stock_data import fetch_stock_data
-                effective_ticker = str(ticker) if ticker and str(ticker).lower() != 'null' else None
-                buy_price = 0.0
-                if effective_ticker:
-                    s_data = fetch_stock_data(effective_ticker)
-                    if s_data:
-                        buy_price = s_data['current_price']
-                        stock_info = f"【株価: {buy_price:.1f} (前日比 {s_data['change_percent']:+.2f}%)】"
-                        decision_reason = f"{stock_info} {decision_reason}"
-                    else:
-                        logger.warning("株価取得失敗（ticker=%s）。価格 0 で記録します。", effective_ticker)
+    # 全記事をバッチサイズで分割
+    batches = [news_list[i:i + BATCH_SIZE] for i in range(0, len(news_list), BATCH_SIZE)]
+    # index は news_list 上の絶対位置
+    gemini_results: dict[int, dict] = {}
 
-                # BUY/SELL は株価取得の成否にかかわらず必ず記録する
-                if decision in ('BUY', 'SELL') and company_name:
-                    sim_ticker = effective_ticker or company_name[:8]
-                    record_simulation(
-                        company_name, sim_ticker, decision, buy_price,
-                        holding_days=holding_days,
-                        take_profit_pct=take_profit_pct,
-                        stop_loss_pct=stop_loss_pct,
-                    )
-        else:
+    for batch_idx, batch in enumerate(batches):
+        offset = batch_idx * BATCH_SIZE
+        batch_input = [
+            {"index": offset + j, "title": n['title'], "panic_score": n['panic_score']}
+            for j, n in enumerate(batch)
+        ]
+        raw_results = decide_trade_batch_with_gemini(batch_input, focus_targets)
+        record_gemini_calls(1)
+        for r in raw_results:
+            abs_idx = r.get('index', -1)
+            if isinstance(abs_idx, int) and 0 <= abs_idx < len(news_list):
+                gemini_results[abs_idx] = r
+
+        if batch_idx < len(batches) - 1:
+            time.sleep(4)  # Rate Limit 対策
+
+    # --------------------------------------------------
+    # 4. 結果の統合・シミュレーション記録
+    # --------------------------------------------------
+    from src.utils.stock_data import fetch_stock_data
+
+    items        = []
+    alert_targets = []
+
+    for abs_idx, news in enumerate(news_list):
+        panic_score = news['panic_score']
+        gemini      = gemini_results.get(abs_idx, {})
+
+        if not gemini:
             decision        = "HOLD"
-            decision_reason = ""
+            decision_reason = "Gemini 未応答"
+        else:
+            decision        = gemini.get('signal', 'HOLD')
+            decision_reason = gemini.get('reason', '')
+            company_name    = gemini.get('company_name', '')
+            ticker          = gemini.get('ticker')
+            holding_days    = int(gemini.get('holding_days', 3))
+            take_profit_pct = float(gemini.get('take_profit_pct', 15.0))
+            stop_loss_pct   = float(gemini.get('stop_loss_pct', 10.0))
+
+            effective_ticker = str(ticker) if ticker and str(ticker).lower() != 'null' else None
+            buy_price = 0.0
+            if effective_ticker:
+                s_data = fetch_stock_data(effective_ticker)
+                if s_data:
+                    buy_price = s_data['current_price']
+                    stock_info = f"【株価: {buy_price:.1f} (前日比 {s_data['change_percent']:+.2f}%)】"
+                    decision_reason = f"{stock_info} {decision_reason}"
+                else:
+                    logger.warning("株価取得失敗（ticker=%s）。価格 0 で記録します。", effective_ticker)
+
+            if decision in ('BUY', 'SELL') and company_name:
+                sim_ticker = effective_ticker or company_name[:8]
+                record_simulation(
+                    company_name, sim_ticker, decision, buy_price,
+                    holding_days=holding_days,
+                    take_profit_pct=take_profit_pct,
+                    stop_loss_pct=stop_loss_pct,
+                )
 
         item = {
             **news,
-            'panic_score':    panic_score,
-            'panic_reason':   panic_reason,
             'decision':       decision,
             'decision_reason': decision_reason,
         }
         items.append(item)
 
-        # ALERT_THRESHOLD 以上かつ BUY → メール対象
         if panic_score >= ALERT_THRESHOLD and decision == "BUY":
             alert_targets.append(item)
 
         icon = "🚨" if item in alert_targets else ("⚠️ " if decision == "BUY" else "  ")
-        print(f"  {icon} [{news['source']}] パニック度:{panic_score:3d} {decision:<5} {title[:45]}")
+        print(f"  {icon} [{news['source']}] パニック度:{panic_score:3d} {decision:<5} {news['title'][:45]}")
 
     # --------------------------------------------------
     # 3. 高パニックニュース群からトレンド分析 → 注目銘柄シート＆JSON 更新
