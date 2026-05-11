@@ -1,7 +1,25 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git -C \"c:/github/AI-Trade-Bot\" status)"
+      "Bash(git -C \"c:/github/AI-Trade-Bot\" status)",
+      "Bash(.venv/Scripts/pip freeze *)",
+      "Bash(\"c:/github/AI-Trade-Bot/.venv/Scripts/python.exe\" -m pip freeze)",
+      "Bash(\"c:/github/AI-Trade-Bot/.venv/Scripts/python.exe\" -m pip list --format=freeze)",
+      "PowerShell(& \"c:\\\\github\\\\AI-Trade-Bot\\\\.venv\\\\Scripts\\\\python.exe\" -m pip list --format=freeze 2>&1 | Select-String -Pattern \"schedule|feedparser|jpholiday|google-genai|google-api|google-auth|dotenv|yfinance|requests|streamlit|pandas|lxml|pytz|tzdata\" | ForEach-Object { $_.Line })",
+      "PowerShell(& \"c:\\\\github\\\\AI-Trade-Bot\\\\.venv\\\\Scripts\\\\python.exe\" -m pip list 2>&1)",
+      "PowerShell(head -5)",
+      "PowerShell(Get-ChildItem \"c:\\\\github\\\\AI-Trade-Bot\\\\.venv\\\\Lib\\\\site-packages\" -Directory | Where-Object { $_.Name -match \"\\\\.dist-info$\" } | Select-Object -ExpandProperty Name | Where-Object { $_ -match \"^\\(schedule|feedparser|jpholiday|google_genai|google_api_python_client|google_auth_oauthlib|google_auth_httplib2|google_auth-|python_dotenv|yfinance|requests-|streamlit|pandas-|lxml-|pytz-|tzdata\\)\" } | Sort-Object)",
+      "PowerShell(Get-ChildItem \"c:\\\\github\\\\AI-Trade-Bot\\\\.venv\\\\Lib\\\\site-packages\" -Directory | Where-Object { $_.Name -match \"jpholiday\" } | Select-Object -ExpandProperty Name)",
+      "PowerShell(Get-ChildItem \"c:\\\\github\\\\AI-Trade-Bot\\\\.venv\\\\Lib\\\\site-packages\" -Directory | Where-Object { $_.Name -match \"holiday\" } | Select-Object -ExpandProperty Name)",
+      "Bash(python -c \"import jpholiday; print\\('ok'\\)\")",
+      "Bash(pip show *)",
+      "Bash(pip index *)",
+      "PowerShell(Get-ChildItem \"c:\\\\github\\\\AI-Trade-Bot\\\\.venv\\\\Lib\\\\site-packages\" -Directory | Where-Object { $_.Name -match \"jp\" } | Select-Object -ExpandProperty Name)",
+      "PowerShell(Get-ChildItem \"c:\\\\github\\\\AI-Trade-Bot\\\\.venv\\\\Lib\\\\site-packages\" | Where-Object { $_.Name -match \"holiday\" } | Select-Object -ExpandProperty Name)",
+      "Bash(python3 -c \"import urllib.request; data = urllib.request.urlopen\\('https://pypi.org/pypi/jpholiday/json', timeout=5\\).read\\(\\)\")",
+      "PowerShell($response = Invoke-WebRequest -Uri \"https://pypi.org/pypi/jpholiday/json\" -UseBasicParsing -TimeoutSec 10 2>&1; if \\($?\\) { \\($response.Content | ConvertFrom-Json\\).info.name + \" \" + \\($response.Content | ConvertFrom-Json\\).info.version } else { \"not found\" })",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }

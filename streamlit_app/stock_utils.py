@@ -1,8 +1,24 @@
 """株価データ取得・チャート描画ユーティリティ"""
+import os
+import sys
 import yfinance as yf
 import plotly.graph_objects as go
 import streamlit as st
 from datetime import datetime, timedelta
+
+# src/ をインポートパスに追加（app.py と同一プロセスだが念のため）
+_repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
+
+def _sync_to_spreadsheet() -> None:
+    """注目銘柄リストをスプレッドシートに自動同期する（失敗しても無視）。"""
+    try:
+        from src.utils.spreadsheet import update_focus_targets
+        update_focus_targets(st.session_state.get("focus_targets", []))
+    except Exception:
+        pass
 
 
 def _normalize_ticker(ticker: str) -> str:
@@ -95,6 +111,7 @@ def render_stock_card(stock: dict, msg_idx: int, stock_idx: int):
                         "theme":        theme,
                         "reason":       reason,
                     })
+                    _sync_to_spreadsheet()
                     st.rerun()
 
         # ── TradingView リンク ────────────────────────────────
